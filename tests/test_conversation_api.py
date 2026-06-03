@@ -1,3 +1,15 @@
+"""
+/* ========================================================================== */
+/* GEB L3: 会话 API 测试                                                      */
+/* ========================================================================== */
+/**
+ * [INPUT]: 依赖 FastAPI TestClient、SQLite 会话夹具、schemas 与 channel_gateway
+ * [OUTPUT]: 验证会话详情、消息列表、人工接管、释放与人工发信投递
+ * [POS]: tests 的 conversations HTTP 契约证明文件，锁住会话资源行为
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+"""
+
 from app import models
 from app.schemas import ChannelContact, InboundMessage
 from app.services.channel_gateway import ingest_inbound_message
@@ -35,6 +47,19 @@ def test_inquiries_list_detail_and_patch(client, db_session):
     assert patch_response.json()["status"] == "qualifying"
 
 
+def test_inquiries_list_prioritizes_high_value_grade(client, db_session):
+    c_inquiry, _, _ = _seed_inquiry(db_session, message_id="api-c", content="Need 100 lamps.")
+    c_inquiry.grade = "C"
+    a_inquiry, _, _ = _seed_inquiry(db_session, message_id="api-a", content="Need 5000 LED desk lamps to US.")
+    a_inquiry.grade = "A"
+    db_session.commit()
+
+    response = client.get("/api/v1/inquiries")
+
+    assert response.status_code == 200
+    assert [item["grade"] for item in response.json()["items"][:2]] == ["A", "C"]
+
+
 def test_inquiry_api_is_tenant_scoped(client, db_session):
     inquiry, _, _ = _seed_inquiry(db_session)
 
@@ -70,8 +95,9 @@ def test_conversation_detail_messages_takeover_release_and_human_send(client, db
     assert sent.status_code == 201
     assert sent.json()["sender_role"] == "human"
     assert sent.json()["status"] == "sent"
+    assert sent.json()["delivery"]["status"] == "recorded"
+    assert sent.json()["channel_message_id"] == f"closer:site_form:out:{sent.json()['id']}"
     assert release.json()["is_human_takeover"] is False
 
     db_message = db_session.get(models.Message, sent.json()["id"])
     assert db_message.content == "Thanks, I will confirm the quote."
-

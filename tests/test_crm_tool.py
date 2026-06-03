@@ -1,3 +1,15 @@
+"""
+/* ========================================================================== */
+/* GEB L3: CRM 工具测试                                                       */
+/* ========================================================================== */
+/**
+ * [INPUT]: 依赖 pytest、SQLite 会话夹具、agent_tools、schemas 与 channel_gateway
+ * [OUTPUT]: 验证 get_customer 工具可按询盘或客户返回租户 scoped CRM 画像
+ * [POS]: tests 的 CRM 工具证明文件，锁住 Agent 门面到客户画像服务的契约
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+"""
+
 import pytest
 
 from app import agent_tools, models
@@ -57,4 +69,3 @@ def test_customer_channels_are_merged_across_inbound_messages(db_session):
     assert profile["channels"]["email"] == "buyer@example.com"
     assert profile["channels"]["phone"] == "15551234567"
     assert profile["channels"]["whatsapp"] == "15551234567"
-

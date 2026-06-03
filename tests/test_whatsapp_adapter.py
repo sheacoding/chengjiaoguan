@@ -1,3 +1,15 @@
+"""
+/* ========================================================================== */
+/* GEB L3: WhatsApp 适配器测试                                                */
+/* ========================================================================== */
+/**
+ * [INPUT]: 依赖 hmac/sha256、app.models 与 WhatsAppAdapter
+ * [OUTPUT]: 验证 WhatsApp webhook 标准化、文本 payload 组合与签名校验
+ * [POS]: tests 的 WhatsApp 边界证明文件，锁住 Cloud API payload 与入站解析契约
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+"""
+
 import hmac
 from hashlib import sha256
 
@@ -82,4 +94,3 @@ def test_whatsapp_webhook_ingests_message(client, db_session):
     message = db_session.get(models.Message, data["message_id"])
     assert message.channel_message_id == "wamid.001"
     assert message.sender_role == "customer"
-

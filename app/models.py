@@ -1,3 +1,15 @@
+"""
+/* ========================================================================== */
+/* GEB L3: ORM 数据模型                                                       */
+/* ========================================================================== */
+/**
+ * [INPUT]: 依赖 SQLAlchemy ORM、PostgreSQL JSONB 变体与 app.database.Base/utcnow
+ * [OUTPUT]: 对外提供 Seller、SellerApiKey、ChannelAccount、Product、PricingRule、PricingRuleVersion、Customer、Inquiry、Conversation、Message、DeliveryAttempt、Quotation、QuotationItem、FollowupTask、KnowledgeChunk、Notification、AuditLog、Approval
+ * [POS]: app 的数据库结构真源，必须与 migrations/001_initial.sql 保持同构
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+"""
+
 from sqlalchemy import (
     Boolean,
     Date,
@@ -46,6 +58,23 @@ class Seller(IdMixin, TimestampMixin, SoftDeleteMixin, Base):
     settings: Mapped[dict] = mapped_column(JsonDict, default=dict)
 
 
+class SellerApiKey(IdMixin, TimestampMixin, Base):
+    __tablename__ = "seller_api_key"
+    __table_args__ = (
+        Index("ix_seller_api_key_seller_status", "seller_id", "status"),
+        UniqueConstraint("token_hash", name="uq_seller_api_key_token_hash"),
+    )
+
+    seller_id: Mapped[int] = mapped_column(ForeignKey("seller.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    token_prefix: Mapped[str] = mapped_column(String(24), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    scopes: Mapped[list] = mapped_column(JsonList, default=list)
+    status: Mapped[str] = mapped_column(String(20), default="active", nullable=False)
+    last_used_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
+
+
 class ChannelAccount(IdMixin, TimestampMixin, Base):
     __tablename__ = "channel_account"
     __table_args__ = (Index("ix_channel_account_seller_id", "seller_id"),)
@@ -86,6 +115,23 @@ class PricingRule(IdMixin, TimestampMixin, SoftDeleteMixin, Base):
     valid_days: Mapped[int | None] = mapped_column(Integer)
     floor_price: Mapped[object] = mapped_column(Numeric(14, 2), nullable=False)
     currency: Mapped[str] = mapped_column(String(8), default="USD", nullable=False)
+
+
+class PricingRuleVersion(IdMixin, Base):
+    __tablename__ = "pricing_rule_version"
+    __table_args__ = (
+        Index("ix_pricing_rule_version_rule_id", "pricing_rule_id"),
+        Index("ix_pricing_rule_version_seller_id", "seller_id"),
+        UniqueConstraint("pricing_rule_id", "version", name="uq_pricing_rule_version_rule_version"),
+    )
+
+    seller_id: Mapped[int] = mapped_column(ForeignKey("seller.id"), nullable=False)
+    pricing_rule_id: Mapped[int] = mapped_column(ForeignKey("pricing_rule.id"), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    actor: Mapped[str | None] = mapped_column(String(12))
+    action_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    snapshot: Mapped[dict] = mapped_column(JsonDict, default=dict)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
 class Customer(IdMixin, TimestampMixin, SoftDeleteMixin, Base):
@@ -163,6 +209,29 @@ class Message(IdMixin, TimestampMixin, Base):
     sent_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
 
 
+class DeliveryAttempt(IdMixin, TimestampMixin, Base):
+    __tablename__ = "delivery_attempt"
+    __table_args__ = (
+        Index("ix_delivery_attempt_seller_status", "seller_id", "status"),
+        Index("ix_delivery_attempt_next_retry", "next_retry_at", "status"),
+        Index("ix_delivery_attempt_message_id", "message_id"),
+    )
+
+    seller_id: Mapped[int] = mapped_column(ForeignKey("seller.id"), nullable=False)
+    message_id: Mapped[int] = mapped_column(ForeignKey("message.id"), nullable=False)
+    channel_account_id: Mapped[int | None] = mapped_column(ForeignKey("channel_account.id"))
+    channel: Mapped[str] = mapped_column(String(20), nullable=False)
+    external_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    client: Mapped[str | None] = mapped_column(String(40))
+    provider_message_id: Mapped[str | None] = mapped_column(String(120))
+    attempt_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    next_retry_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
+    error: Mapped[str | None] = mapped_column(Text)
+    payload: Mapped[dict] = mapped_column(JsonDict, default=dict)
+    response: Mapped[dict] = mapped_column(JsonDict, default=dict)
+
+
 class Quotation(IdMixin, TimestampMixin, SoftDeleteMixin, Base):
     __tablename__ = "quotation"
     __table_args__ = (
@@ -220,6 +289,25 @@ class KnowledgeChunk(IdMixin, TimestampMixin, Base):
     embedding: Mapped[list] = mapped_column(JsonList, default=list)
 
 
+class Notification(IdMixin, TimestampMixin, Base):
+    __tablename__ = "notification"
+    __table_args__ = (
+        Index("ix_notification_seller_status", "seller_id", "status"),
+        Index("ix_notification_target", "target_type", "target_id"),
+    )
+
+    seller_id: Mapped[int] = mapped_column(ForeignKey("seller.id"), nullable=False)
+    type: Mapped[str] = mapped_column(String(40), nullable=False)
+    severity: Mapped[str] = mapped_column(String(20), default="info", nullable=False)
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    body: Mapped[str | None] = mapped_column(Text)
+    target_type: Mapped[str | None] = mapped_column(String(40))
+    target_id: Mapped[int | None] = mapped_column(Integer)
+    context: Mapped[dict] = mapped_column(JsonDict, default=dict)
+    status: Mapped[str] = mapped_column(String(20), default="unread", nullable=False)
+    read_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
+
+
 class AuditLog(IdMixin, Base):
     __tablename__ = "audit_log"
     __table_args__ = (Index("ix_audit_log_seller_created_at", "seller_id", "created_at"),)
@@ -251,4 +339,3 @@ class Approval(IdMixin, TimestampMixin, Base):
     payload: Mapped[dict] = mapped_column(JsonDict, default=dict)
     status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
     executed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-

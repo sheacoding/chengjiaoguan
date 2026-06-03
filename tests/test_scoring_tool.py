@@ -1,3 +1,15 @@
+"""
+/* ========================================================================== */
+/* GEB L3: 询盘打分测试                                                       */
+/* ========================================================================== */
+/**
+ * [INPUT]: 依赖 SQLite 会话夹具、agent_tools、models、schemas 与 channel_gateway
+ * [OUTPUT]: 验证 score_inquiry 输出 A/B/C grade、score 与 explainable signals
+ * [POS]: tests 的 scoring 工具证明文件，锁住询盘优先级判断规则
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+"""
+
 from app import agent_tools, models
 from app.services.channel_gateway import ingest_inbound_message
 from app.schemas import ChannelContact, InboundMessage
@@ -57,4 +69,3 @@ def test_get_inquiry_tool_returns_parsed_fields(db_session):
     assert result["id"] == inquiry.id
     assert result["parsed"]["quantity"] == 1000
     assert result["language"] == "en"
-

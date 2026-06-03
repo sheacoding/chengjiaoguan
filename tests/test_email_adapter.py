@@ -1,3 +1,15 @@
+"""
+/* ========================================================================== */
+/* GEB L3: Email 适配器测试                                                   */
+/* ========================================================================== */
+/**
+ * [INPUT]: 依赖 app.models、channel_gateway 与 EmailAdapter/OutboundEmail
+ * [OUTPUT]: 验证原始邮件解析、SMTP 文本组合与 email 入站幂等落库
+ * [POS]: tests 的 email adapter 证明文件，锁住邮件边界的确定性解析和组合
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+"""
+
 from app import models
 from app.services.channel_gateway import ingest_inbound_message
 from app.services.email_adapter import EmailAdapter, OutboundEmail
@@ -60,4 +72,3 @@ Need 1200 LED desk lamps to US.
     assert conversation.channel == "email"
     assert message.channel_message_id == "email-ingest-001@example.com"
     assert db_session.get(models.Customer, inquiry.customer_id).email == "buyer@example.com"
-

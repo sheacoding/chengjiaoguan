@@ -1,5 +1,7 @@
 npm-cache/
 node_modules/
+.DS_Store
+.venv/
 *.egg-info/
 __pycache__/
 .pytest_cache/
@@ -10,6 +12,8 @@ build/
 .turbo/
 .cache/
 coverage/
+frontend/playwright-report/
+frontend/test-results/
 *.db
 .env
 .env.*

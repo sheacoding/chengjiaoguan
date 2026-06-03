@@ -1,3 +1,15 @@
+"""
+/* ========================================================================== */
+/* GEB L3: Email 适配器                                                       */
+/* ========================================================================== */
+/**
+ * [INPUT]: 依赖 Python email 标准库与 schemas.ChannelContact/InboundMessage
+ * [OUTPUT]: 对外提供 OutboundEmail 与 EmailAdapter
+ * [POS]: services 的 email 渠道边界，负责原始邮件标准化与 SMTP 文本消息组合
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+"""
+
 from dataclasses import dataclass
 from email import message_from_string
 from email.message import EmailMessage
@@ -62,4 +74,3 @@ class EmailAdapter:
                     return part.get_content().strip()
             return ""
         return parsed.get_content().strip()
-

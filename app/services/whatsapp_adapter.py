@@ -1,3 +1,15 @@
+"""
+/* ========================================================================== */
+/* GEB L3: WhatsApp 适配器                                                    */
+/* ========================================================================== */
+/**
+ * [INPUT]: 依赖 hmac/sha256、datetime UTC 与 schemas.ChannelContact/InboundMessage
+ * [OUTPUT]: 对外提供 WhatsAppAdapter
+ * [POS]: services 的 WhatsApp Cloud API 边界，负责 webhook 标准化、payload 组合与签名校验
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+"""
+
 import hmac
 from datetime import UTC, datetime
 from hashlib import sha256
@@ -80,4 +92,3 @@ class WhatsAppAdapter:
         if message.get("type") == "button":
             return (message.get("button") or {}).get("text", "")
         return f"[{message.get('type', 'unknown')} message]"
-

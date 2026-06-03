@@ -1,3 +1,15 @@
+"""
+/* ========================================================================== */
+/* GEB L3: 产品匹配测试                                                       */
+/* ========================================================================== */
+/**
+ * [INPUT]: 依赖 SQLite 会话夹具、agent_tools、models 与 product_matching 服务
+ * [OUTPUT]: 验证产品字段 token 命中、排序、解释与软删除过滤
+ * [POS]: tests 的产品匹配证明文件，锁住询盘理解到产品候选的确定性桥梁
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+"""
+
 from app import agent_tools, models
 from app.services.product_matching import match_product
 

@@ -13,6 +13,21 @@ CREATE TABLE seller (
   deleted_at timestamptz
 );
 
+CREATE TABLE seller_api_key (
+  id BIGSERIAL PRIMARY KEY,
+  seller_id bigint NOT NULL REFERENCES seller(id),
+  name varchar(120) NOT NULL,
+  token_prefix varchar(24) NOT NULL,
+  token_hash varchar(64) NOT NULL,
+  scopes jsonb NOT NULL DEFAULT '[]'::jsonb,
+  status varchar(20) NOT NULL DEFAULT 'active',
+  last_used_at timestamptz,
+  revoked_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT uq_seller_api_key_token_hash UNIQUE (token_hash)
+);
+
 CREATE TABLE channel_account (
   id BIGSERIAL PRIMARY KEY,
   seller_id bigint NOT NULL REFERENCES seller(id),
@@ -55,6 +70,18 @@ CREATE TABLE pricing_rule (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   deleted_at timestamptz
+);
+
+CREATE TABLE pricing_rule_version (
+  id BIGSERIAL PRIMARY KEY,
+  seller_id bigint NOT NULL REFERENCES seller(id),
+  pricing_rule_id bigint NOT NULL REFERENCES pricing_rule(id),
+  version integer NOT NULL,
+  actor varchar(12),
+  action_type varchar(40) NOT NULL,
+  snapshot jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT uq_pricing_rule_version_rule_version UNIQUE (pricing_rule_id, version)
 );
 
 CREATE TABLE customer (
@@ -119,6 +146,25 @@ CREATE TABLE message (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TABLE delivery_attempt (
+  id BIGSERIAL PRIMARY KEY,
+  seller_id bigint NOT NULL REFERENCES seller(id),
+  message_id bigint NOT NULL REFERENCES message(id),
+  channel_account_id bigint REFERENCES channel_account(id),
+  channel varchar(20) NOT NULL,
+  external_id varchar(120) NOT NULL,
+  status varchar(20) NOT NULL,
+  client varchar(40),
+  provider_message_id varchar(120),
+  attempt_count integer NOT NULL DEFAULT 1,
+  next_retry_at timestamptz,
+  error text,
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  response jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
 CREATE TABLE quotation (
   id BIGSERIAL PRIMARY KEY,
   seller_id bigint NOT NULL REFERENCES seller(id),
@@ -172,6 +218,22 @@ CREATE TABLE knowledge_chunk (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TABLE notification (
+  id BIGSERIAL PRIMARY KEY,
+  seller_id bigint NOT NULL REFERENCES seller(id),
+  type varchar(40) NOT NULL,
+  severity varchar(20) NOT NULL DEFAULT 'info',
+  title varchar(160) NOT NULL,
+  body text,
+  target_type varchar(40),
+  target_id bigint,
+  context jsonb NOT NULL DEFAULT '{}'::jsonb,
+  status varchar(20) NOT NULL DEFAULT 'unread',
+  read_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
 CREATE TABLE audit_log (
   id BIGSERIAL PRIMARY KEY,
   seller_id bigint NOT NULL REFERENCES seller(id),
@@ -201,8 +263,11 @@ CREATE TABLE approval (
 );
 
 CREATE INDEX ix_channel_account_seller_id ON channel_account(seller_id);
+CREATE INDEX ix_seller_api_key_seller_status ON seller_api_key(seller_id, status);
 CREATE INDEX ix_product_seller_id ON product(seller_id);
 CREATE INDEX ix_pricing_rule_seller_id ON pricing_rule(seller_id);
+CREATE INDEX ix_pricing_rule_version_rule_id ON pricing_rule_version(pricing_rule_id);
+CREATE INDEX ix_pricing_rule_version_seller_id ON pricing_rule_version(seller_id);
 CREATE INDEX ix_customer_seller_email ON customer(seller_id, email);
 CREATE INDEX ix_customer_seller_grade ON customer(seller_id, grade);
 CREATE INDEX ix_inquiry_seller_status ON inquiry(seller_id, status);
@@ -210,13 +275,17 @@ CREATE INDEX ix_inquiry_seller_grade ON inquiry(seller_id, grade);
 CREATE INDEX ix_inquiry_customer_id ON inquiry(customer_id);
 CREATE INDEX ix_conversation_seller_id ON conversation(seller_id);
 CREATE INDEX ix_message_conversation_sent_at ON message(conversation_id, sent_at);
+CREATE INDEX ix_delivery_attempt_seller_status ON delivery_attempt(seller_id, status);
+CREATE INDEX ix_delivery_attempt_next_retry ON delivery_attempt(next_retry_at, status);
+CREATE INDEX ix_delivery_attempt_message_id ON delivery_attempt(message_id);
 CREATE INDEX ix_quotation_inquiry_id ON quotation(inquiry_id);
 CREATE INDEX ix_quotation_seller_status ON quotation(seller_id, status);
 CREATE INDEX ix_quotation_item_quotation_id ON quotation_item(quotation_id);
 CREATE INDEX ix_followup_next_status ON followup_task(next_run_at, status);
 CREATE INDEX ix_knowledge_chunk_seller_id ON knowledge_chunk(seller_id);
 CREATE INDEX ix_knowledge_chunk_embedding ON knowledge_chunk USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX ix_notification_seller_status ON notification(seller_id, status);
+CREATE INDEX ix_notification_target ON notification(target_type, target_id);
 CREATE INDEX ix_audit_log_seller_created_at ON audit_log(seller_id, created_at);
 CREATE INDEX ix_approval_seller_status ON approval(seller_id, status);
 CREATE INDEX ix_approval_conversation_id ON approval(conversation_id);
-

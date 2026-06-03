@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <!--
+      [INPUT]: 依赖 Vite module script 与 src/main.jsx
+      [OUTPUT]: 对外提供 Closer Workbench HTML 挂载点
+      [POS]: frontend 的 HTML 入口，被 Vite dev/build 消费
+      [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+    -->
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Closer Workbench</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

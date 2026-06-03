@@ -1,11 +1,23 @@
+"""
+/* ========================================================================== */
+/* GEB L3: 审批服务                                                           */
+/* ========================================================================== */
+/**
+ * [INPUT]: 依赖 SQLAlchemy Session、app.models、approval_execution.execute_approval 与 notifications 服务
+ * [OUTPUT]: 对外提供 list_approvals、request_handoff、patch_approval、approve_approval、reject_approval
+ * [POS]: services 的人工审批队列状态核心，把具体副作用交给 approval_execution
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+"""
+
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import models
-from app.database import utcnow
-from app.services.quotations import send_quotation
+from app.services.approval_execution import execute_approval
+from app.services.notifications import notify_approval_requested, resolve_approval_notifications
 
 
 def list_approvals(session: Session, seller_id: int, *, status: str | None = "pending") -> list[models.Approval]:
@@ -13,6 +25,55 @@ def list_approvals(session: Session, seller_id: int, *, status: str | None = "pe
     if status:
         statement = statement.where(models.Approval.status == status)
     return session.scalars(statement.order_by(models.Approval.id.desc())).all()
+
+
+def request_handoff(
+    session: Session,
+    seller_id: int,
+    *,
+    conversation_id: int,
+    reason: str,
+    summary: str,
+    suggestion: str | None = None,
+    payload: dict[str, Any] | None = None,
+) -> models.Approval:
+    conversation = session.get(models.Conversation, conversation_id)
+    if conversation is None or conversation.seller_id != seller_id:
+        raise LookupError("Conversation not found")
+    inquiry = session.get(models.Inquiry, conversation.inquiry_id)
+    if inquiry is None or inquiry.seller_id != seller_id:
+        raise LookupError("Inquiry not found")
+
+    conversation.is_human_takeover = True
+    inquiry.status = "pending_approval"
+    approval = models.Approval(
+        seller_id=seller_id,
+        conversation_id=conversation.id,
+        inquiry_id=inquiry.id,
+        type="handoff",
+        reason=reason,
+        summary=summary,
+        suggestion=suggestion,
+        payload=payload or {},
+        status="pending",
+        executed=False,
+    )
+    session.add(approval)
+    session.flush()
+    notify_approval_requested(session, approval)
+    session.add(
+        models.AuditLog(
+            seller_id=seller_id,
+            actor="ai",
+            action_type="handoff_requested",
+            target_type="approval",
+            target_id=approval.id,
+            is_auto=True,
+            snapshot={"reason": reason, "summary": summary},
+        )
+    )
+    session.flush()
+    return approval
 
 
 def patch_approval(
@@ -50,9 +111,10 @@ def patch_approval(
 
 def approve_approval(session: Session, seller_id: int, approval_id: int) -> dict:
     approval = _require_pending_approval(session, seller_id, approval_id)
-    result = _execute_approval(session, approval)
+    result = execute_approval(session, approval)
     approval.status = "approved"
     approval.executed = True
+    resolve_approval_notifications(session, seller_id, approval.id)
     session.add(
         models.AuditLog(
             seller_id=seller_id,
@@ -76,6 +138,7 @@ def reject_approval(session: Session, seller_id: int, approval_id: int, *, reaso
     approval.payload = payload
     approval.status = "rejected"
     approval.executed = False
+    resolve_approval_notifications(session, seller_id, approval.id)
     session.add(
         models.AuditLog(
             seller_id=seller_id,
@@ -98,36 +161,3 @@ def _require_pending_approval(session: Session, seller_id: int, approval_id: int
     if approval.status != "pending":
         raise ValueError("Approval is not pending")
     return approval
-
-
-def _execute_approval(session: Session, approval: models.Approval) -> dict:
-    if approval.type == "message_send":
-        return _execute_message_send(session, approval)
-    if approval.type == "quotation_send":
-        quotation_id = int((approval.payload or {})["quotation_id"])
-        return send_quotation(session, approval.seller_id, quotation_id, approved=True)
-    raise ValueError(f"Unsupported approval type: {approval.type}")
-
-
-def _execute_message_send(session: Session, approval: models.Approval) -> dict:
-    conversation = session.get(models.Conversation, approval.conversation_id)
-    if conversation is None or conversation.seller_id != approval.seller_id:
-        raise LookupError("Conversation not found")
-    payload = approval.payload or {}
-    content = payload.get("content") or approval.suggestion
-    if not content:
-        raise ValueError("Approval payload content is required")
-    message = models.Message(
-        conversation_id=conversation.id,
-        sender_role="ai",
-        content=content,
-        language=payload.get("language") or conversation.language,
-        sent_at=utcnow(),
-    )
-    conversation.is_human_takeover = False
-    inquiry = session.get(models.Inquiry, approval.inquiry_id)
-    if inquiry is not None:
-        inquiry.status = "responded"
-    session.add(message)
-    session.flush()
-    return {"status": "sent", "message_id": message.id, "conversation_id": conversation.id}

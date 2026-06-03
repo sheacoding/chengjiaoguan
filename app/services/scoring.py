@@ -1,3 +1,15 @@
+"""
+/* ========================================================================== */
+/* GEB L3: 询盘打分服务                                                       */
+/* ========================================================================== */
+/**
+ * [INPUT]: 依赖 SQLAlchemy Session、app.models 与 Decimal 规则权重
+ * [OUTPUT]: 对外提供 InquiryScore、score_inquiry_record、score_inquiry
+ * [POS]: services 的询盘分级核心，以可解释 signals 输出 A/B/C
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+"""
+
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -93,4 +105,3 @@ def score_inquiry(session: Session, seller_id: int, inquiry_id: int) -> InquiryS
 def _is_corporate_domain(email: str) -> bool:
     domain = email.rsplit("@", 1)[-1].lower()
     return domain not in PUBLIC_EMAIL_DOMAINS and "." in domain
-

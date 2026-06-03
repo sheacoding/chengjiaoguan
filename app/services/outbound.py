@@ -1,3 +1,15 @@
+"""
+/* ========================================================================== */
+/* GEB L3: 出站消息服务                                                       */
+/* ========================================================================== */
+/**
+ * [INPUT]: 依赖 SQLAlchemy Session、app.models、utcnow、channel_delivery、seller_settings、notifications、Decimal 与敏感/金额解析规则
+ * [OUTPUT]: 对外提供 send_message
+ * [POS]: services 的出站护栏核心，在安全时经渠道投递边界发消息，在风险时创建 approval
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+"""
+
 from decimal import Decimal, InvalidOperation
 import re
 
@@ -6,6 +18,9 @@ from sqlalchemy.orm import Session
 
 from app import models
 from app.database import utcnow
+from app.services.channel_delivery import deliver_message
+from app.services.notifications import notify_approval_requested
+from app.services.seller_settings import apply_ai_disclosure
 
 
 SENSITIVE_KEYWORDS = {
@@ -51,14 +66,17 @@ def send_message(
             "reasons": reasons,
         }
 
+    disclosed_content = apply_ai_disclosure(session, seller_id, content)
     message = models.Message(
         conversation_id=conversation.id,
         sender_role="ai",
-        content=content,
+        content=disclosed_content,
         language=language or conversation.language,
         sent_at=utcnow(),
     )
     session.add(message)
+    session.flush()
+    delivery = deliver_message(session, seller_id, conversation, message)
     session.add(
         models.AuditLog(
             seller_id=seller_id,
@@ -67,7 +85,7 @@ def send_message(
             target_type="conversation",
             target_id=conversation.id,
             is_auto=True,
-            snapshot={"content": content},
+            snapshot={"content": disclosed_content, "delivery": delivery},
         )
     )
     session.flush()
@@ -77,6 +95,7 @@ def send_message(
         "conversation_id": conversation.id,
         "content": message.content,
         "language": message.language,
+        "delivery": delivery,
     }
 
 
@@ -169,6 +188,7 @@ def _create_message_approval(
     )
     session.add(approval)
     session.flush()
+    notify_approval_requested(session, approval)
     session.add(
         models.AuditLog(
             seller_id=seller_id,

@@ -1,9 +1,23 @@
+"""
+/* ========================================================================== */
+/* GEB L3: Agent 工具门面                                                     */
+/* ========================================================================== */
+/**
+ * [INPUT]: 依赖 SQLAlchemy Session、app.models 与 services 的确定性业务能力、notifications 审批提醒
+ * [OUTPUT]: 对外提供 get_inquiry、score_inquiry、get_customer、calc_quote、generate_pi、search_knowledge、match_product、send_message、create_followup、request_handoff
+ * [POS]: app 的 Agent 工具稳定签名层，被 app.agent.tools 和 Role B 编排层调用
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+"""
+
 from sqlalchemy.orm import Session
 
 from app import models
+from app.services.approvals import request_handoff as request_handoff_service
 from app.services.crm import get_customer_profile
 from app.services.followups import create_followup as create_followup_service
 from app.services.knowledge import search_knowledge as search_knowledge_service
+from app.services.notifications import notify_approval_requested
 from app.services.outbound import send_message as send_message_service
 from app.services.product_matching import match_product as match_product_service
 from app.services.quote_engine import QuoteItemInput, calculate_quote
@@ -129,28 +143,47 @@ def generate_pi(session: Session, seller_id: int, quotation_id: int) -> dict:
     quotation = session.get(models.Quotation, quotation_id)
     if quotation is None or quotation.seller_id != seller_id:
         raise LookupError("Quotation not found")
-    pi_number = f"PI-{quotation.id:06d}"
-    terms = dict(quotation.terms or {})
-    terms["pi_number"] = pi_number
-    quotation.terms = terms
-    quotation.is_pi = True
+    conversation = session.query(models.Conversation).filter_by(
+        seller_id=seller_id,
+        inquiry_id=quotation.inquiry_id,
+    ).one_or_none()
+    if conversation is None:
+        raise LookupError("Conversation not found")
+    approval = models.Approval(
+        seller_id=seller_id,
+        conversation_id=conversation.id,
+        inquiry_id=quotation.inquiry_id,
+        type="pi_generate",
+        reason="pi_requires_approval",
+        summary=f"Generate PI for quotation #{quotation.id} before sending formal invoice content.",
+        suggestion="Review buyer, item, amount, validity, and terms before approving PI generation.",
+        payload={"quotation_id": quotation.id},
+        status="pending",
+        executed=False,
+    )
+    conversation.is_human_takeover = True
+    session.add(
+        approval,
+    )
+    session.flush()
+    notify_approval_requested(session, approval)
     session.add(
         models.AuditLog(
             seller_id=seller_id,
             actor="ai",
-            action_type="pi_generated",
-            target_type="quotation",
-            target_id=quotation.id,
+            action_type="approval_requested",
+            target_type="approval",
+            target_id=approval.id,
             is_auto=True,
-            snapshot={"pi_number": pi_number},
+            snapshot={"type": "pi_generate", "quotation_id": quotation.id},
         )
     )
     session.flush()
     return {
         "quotation_id": quotation.id,
-        "pi_number": pi_number,
-        "is_pi": True,
-        "status": quotation.status,
+        "status": "pending_approval",
+        "approval_id": approval.id,
+        "reason": approval.reason,
     }
 
 
@@ -213,3 +246,24 @@ def create_followup(
         message=message,
         max_attempts=max_attempts,
     )
+
+
+def request_handoff(
+    session: Session,
+    seller_id: int,
+    conversation_id: int,
+    reason: str,
+    summary: str,
+    suggestion: str | None = None,
+    payload: dict | None = None,
+) -> dict:
+    approval = request_handoff_service(
+        session,
+        seller_id,
+        conversation_id=conversation_id,
+        reason=reason,
+        summary=summary,
+        suggestion=suggestion,
+        payload=payload,
+    )
+    return {"approval_id": approval.id, "status": approval.status, "reason": approval.reason}

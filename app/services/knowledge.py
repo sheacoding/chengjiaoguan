@@ -1,15 +1,23 @@
-import hashlib
-import math
-import re
+"""
+/* ========================================================================== */
+/* GEB L3: 轻量知识检索                                                       */
+/* ========================================================================== */
+/**
+ * [INPUT]: 依赖 SQLAlchemy Session、app.models.KnowledgeChunk、embedding_providers、knowledge_index_providers 与 knowledge_search_providers
+ * [OUTPUT]: 对外提供 chunk_text、embed_text、embed_texts、ingest_knowledge、search_knowledge
+ * [POS]: services 的知识切块与检索服务，只消费 embedding provider 和 search provider 协议，不绑定具体模型或索引
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+"""
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import models
-
-
-EMBEDDING_DIMENSIONS = 1536
-TOKEN_PATTERN = re.compile(r"[a-z0-9]+|[\u4e00-\u9fff]", re.IGNORECASE)
+from app.services.embedding_providers import EmbeddingProvider
+from app.services.embedding_providers import embed_texts as embed_with_provider
+from app.services.knowledge_index_providers import KnowledgeIndexProvider, sync_knowledge_index
+from app.services.knowledge_search_providers import KnowledgeSearchProvider, get_knowledge_search_provider
 
 
 def chunk_text(text: str, *, max_chars: int = 800, overlap: int = 120) -> list[str]:
@@ -38,16 +46,12 @@ def chunk_text(text: str, *, max_chars: int = 800, overlap: int = 120) -> list[s
     return chunks
 
 
-def embed_text(text: str) -> list[float]:
-    vector = [0.0] * EMBEDDING_DIMENSIONS
-    for token in _tokens(text):
-        digest = hashlib.blake2b(token.encode("utf-8"), digest_size=4).digest()
-        index = int.from_bytes(digest, "big") % EMBEDDING_DIMENSIONS
-        vector[index] += 1.0
-    norm = math.sqrt(sum(value * value for value in vector))
-    if norm == 0:
-        return vector
-    return [value / norm for value in vector]
+def embed_text(text: str, *, provider: EmbeddingProvider | None = None) -> list[float]:
+    return embed_texts([text], provider=provider)[0]
+
+
+def embed_texts(texts: list[str], *, provider: EmbeddingProvider | None = None) -> list[list[float]]:
+    return embed_with_provider(texts, provider=provider)
 
 
 def ingest_knowledge(
@@ -57,19 +61,24 @@ def ingest_knowledge(
     source_type: str,
     source_ref: str | None,
     content: str,
+    provider: EmbeddingProvider | None = None,
+    index_provider: KnowledgeIndexProvider | None = None,
 ) -> list[models.KnowledgeChunk]:
     records: list[models.KnowledgeChunk] = []
-    for chunk in chunk_text(content):
+    chunks = chunk_text(content)
+    vectors = embed_texts(chunks, provider=provider)
+    for chunk, vector in zip(chunks, vectors, strict=True):
         record = models.KnowledgeChunk(
             seller_id=seller_id,
             source_type=source_type,
             source_ref=source_ref,
             content=chunk,
-            embedding=embed_text(chunk),
+            embedding=vector,
         )
         session.add(record)
         records.append(record)
     session.flush()
+    index_sync = sync_knowledge_index(records, provider=index_provider)
     session.add(
         models.AuditLog(
             seller_id=seller_id,
@@ -78,7 +87,7 @@ def ingest_knowledge(
             target_type="knowledge_chunk",
             target_id=records[0].id if records else None,
             is_auto=True,
-            snapshot={"source_type": source_type, "source_ref": source_ref, "chunks": len(records)},
+            snapshot={"source_type": source_type, "source_ref": source_ref, "chunks": len(records), "index_sync": index_sync},
         )
     )
     return records
@@ -91,41 +100,18 @@ def search_knowledge(
     query: str,
     source_type: str | None = None,
     limit: int = 5,
+    provider: EmbeddingProvider | None = None,
+    search_provider: KnowledgeSearchProvider | None = None,
 ) -> list[dict]:
     if not query.strip():
         raise ValueError("query is required")
     limit = min(max(limit, 1), 20)
-    query_vector = embed_text(query)
+    query_vector = embed_text(query, provider=provider)
 
     statement = select(models.KnowledgeChunk).where(models.KnowledgeChunk.seller_id == seller_id)
     if source_type:
         statement = statement.where(models.KnowledgeChunk.source_type == source_type)
 
-    scored = []
-    for chunk in session.scalars(statement).all():
-        score = _cosine(query_vector, chunk.embedding or [])
-        if score > 0:
-            scored.append((score, chunk))
-    scored.sort(key=lambda item: (item[0], item[1].id), reverse=True)
-
-    return [
-        {
-            "chunk_id": chunk.id,
-            "source_type": chunk.source_type,
-            "source_ref": chunk.source_ref,
-            "content": chunk.content,
-            "score": round(score, 6),
-        }
-        for score, chunk in scored[:limit]
-    ]
-
-
-def _tokens(text: str) -> list[str]:
-    return [match.group(0).lower() for match in TOKEN_PATTERN.finditer(text)]
-
-
-def _cosine(left: list[float], right: list[float]) -> float:
-    if not left or not right:
-        return 0.0
-    length = min(len(left), len(right))
-    return sum(left[index] * right[index] for index in range(length))
+    provider_impl = search_provider or get_knowledge_search_provider()
+    chunks = session.scalars(statement).all()
+    return provider_impl.search(query, query_vector, chunks, limit=limit)

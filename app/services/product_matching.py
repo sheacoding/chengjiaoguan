@@ -1,3 +1,15 @@
+"""
+/* ========================================================================== */
+/* GEB L3: 产品匹配服务                                                       */
+/* ========================================================================== */
+/**
+ * [INPUT]: 依赖 json/re、SQLAlchemy Session 与 app.models.Product
+ * [OUTPUT]: 对外提供 match_product
+ * [POS]: services 的产品证据检索器，用字段 token 重叠为 Agent 回复提供可解释 grounding
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+"""
+
 import json
 import re
 from typing import Any

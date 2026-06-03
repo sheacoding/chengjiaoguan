@@ -1,3 +1,15 @@
+"""
+/* ========================================================================== */
+/* GEB L3: 入站渠道网关                                                       */
+/* ========================================================================== */
+/**
+ * [INPUT]: 依赖 SQLAlchemy Session、app.models 与 schemas.ChannelContact/InboundMessage
+ * [OUTPUT]: 对外提供 ensure_seller、ensure_channel_account、find_or_create_customer、parse_inquiry_content、ingest_inbound_message
+ * [POS]: services 的入站事实创建器，把渠道消息转成客户、询盘、会话、首条消息与审计日志
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+"""
+
 from datetime import UTC, datetime
 
 from sqlalchemy import select
@@ -174,4 +186,3 @@ def ingest_inbound_message(session: Session, seller_id: int, message: InboundMes
         )
     )
     return inquiry, conversation, persisted_message, False
-

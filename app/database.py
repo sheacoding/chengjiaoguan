@@ -1,3 +1,15 @@
+"""
+/* ========================================================================== */
+/* GEB L3: 数据库基础设施                                                     */
+/* ========================================================================== */
+/**
+ * [INPUT]: 依赖 SQLAlchemy engine、DeclarativeBase、Session 与 datetime UTC
+ * [OUTPUT]: 对外提供 Base、build_engine、engine、SessionLocal、get_session、utcnow
+ * [POS]: app 的持久化根基，被 models、main、services 与 tests 共享
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+"""
+
 from collections.abc import Generator
 from datetime import UTC, datetime
 
@@ -31,4 +43,3 @@ def get_session() -> Generator[Session, None, None]:
         yield session
     finally:
         session.close()
-

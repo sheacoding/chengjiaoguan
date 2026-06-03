@@ -1,3 +1,15 @@
+"""
+/* ========================================================================== */
+/* GEB L3: 报价计算核心                                                       */
+/* ========================================================================== */
+/**
+ * [INPUT]: 依赖 SQLAlchemy Session、app.models、Decimal、日期有效期规则与 exchange_rates.resolve_exchange_rate
+ * [OUTPUT]: 对外提供 QuoteItemInput、QuoteLine、QuoteResult、calculate_quote
+ * [POS]: services 的报价算法真源，统一 MOQ、阶梯价、利润、物流、汇率换算、地板价判断
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+"""
+
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
@@ -6,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import models
+from app.services.exchange_rates import resolve_exchange_rate
 
 
 Money = Decimal
@@ -62,8 +75,14 @@ def calculate_quote(
             raise ValueError(f"Quantity {item.quantity} is below MOQ {product.moq} for product {product.id}")
         rule = _require_pricing_rule(session, seller_id, product.id)
         valid_days = rule.valid_days or valid_days
-        unit_price = _unit_price(product, rule, item.quantity, destination)
-        floor_price = _money(rule.floor_price)
+        base_currency = _currency(rule.currency or product.currency or currency)
+        unit_price = _convert_money(
+            _unit_price(product, rule, item.quantity, destination),
+            base_currency,
+            currency,
+            rule,
+        )
+        floor_price = _convert_money(_money(rule.floor_price), base_currency, currency, rule)
         hits_floor = unit_price < floor_price
         amount = _money(unit_price * Decimal(item.quantity))
         total += amount
@@ -120,7 +139,12 @@ def _unit_price(product: models.Product, rule: models.PricingRule, quantity: int
     if tier_price is not None:
         base_price = tier_price
     else:
-        cost = _money(product.cost or Decimal("0"))
+        cost = _convert_money(
+            _money(product.cost or Decimal("0")),
+            _currency(product.currency or rule.currency),
+            _currency(rule.currency or product.currency),
+            rule,
+        )
         margin = _money(rule.margin_rate or Decimal("0"))
         base_price = cost * (Decimal("1") + margin)
 
@@ -144,6 +168,21 @@ def _tier_price(tiers: list[dict], quantity: int) -> Money | None:
     return _money(tier["price"])
 
 
+def _convert_money(value: Money, source_currency: str, target_currency: str, rule: models.PricingRule) -> Money:
+    source_currency = _currency(source_currency)
+    target_currency = _currency(target_currency)
+    if source_currency == target_currency:
+        return _money(value)
+    return _money(value * _exchange_rate(source_currency, target_currency, rule))
+
+
+def _exchange_rate(source_currency: str, target_currency: str, rule: models.PricingRule) -> Decimal:
+    return resolve_exchange_rate(source_currency, target_currency, rule)
+
+
+def _currency(value: str | None) -> str:
+    return (value or "USD").upper()
+
+
 def _money(value) -> Money:
     return Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-
